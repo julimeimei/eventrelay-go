@@ -1,0 +1,123 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMMAND: api
+    container_name: eventrelay-api
+    environment:
+      APP_ENV: docker
+      LOG_LEVEL: info
+      API_ADDR: :8080
+      DATABASE_URL: postgres://eventrelay:eventrelay@postgres:5432/eventrelay?sslmode=disable
+      DATABASE_AUTO_MIGRATE: "true"
+      DATABASE_MIGRATIONS_DIR: migrations
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_EXCHANGE: eventrelay.events
+      RABBITMQ_DELIVERY_QUEUE: eventrelay.deliveries
+      RABBITMQ_DLX: eventrelay.dlx
+      RABBITMQ_DLQ: eventrelay.deliveries.dlq
+      DELIVERY_TIMEOUT: 5s
+      DELIVERY_MAX_ATTEMPTS: 3
+      DELIVERY_RETRY_BASE_DELAY: 2s
+      DELIVERY_RETRY_MAX_DELAY: 30s
+      READ_TIMEOUT: 5s
+      WRITE_TIMEOUT: 10s
+      IDLE_TIMEOUT: 60s
+      MAX_REQUEST_BODY_BYTES: 1048576
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMMAND: worker
+    container_name: eventrelay-worker
+    environment:
+      APP_ENV: docker
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://eventrelay:eventrelay@postgres:5432/eventrelay?sslmode=disable
+      DATABASE_AUTO_MIGRATE: "false"
+      DATABASE_MIGRATIONS_DIR: migrations
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_EXCHANGE: eventrelay.events
+      RABBITMQ_DELIVERY_QUEUE: eventrelay.deliveries
+      RABBITMQ_DLX: eventrelay.dlx
+      RABBITMQ_DLQ: eventrelay.deliveries.dlq
+      DELIVERY_TIMEOUT: 5s
+      DELIVERY_MAX_ATTEMPTS: 3
+      DELIVERY_RETRY_BASE_DELAY: 2s
+      DELIVERY_RETRY_MAX_DELAY: 30s
+      WORKER_METRICS_ADDR: :8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  demo-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COMMAND: demo-consumer
+    container_name: eventrelay-demo-consumer
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: eventrelay-postgres
+    environment:
+      POSTGRES_USER: eventrelay
+      POSTGRES_PASSWORD: eventrelay
+      POSTGRES_DB: eventrelay
+    ports:
+      - "5433:5432"
+    volumes:
+      - eventrelay-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventrelay -d eventrelay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: eventrelay-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  eventrelay-postgres-data:

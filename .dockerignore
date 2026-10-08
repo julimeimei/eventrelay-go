@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+tmp
+temp
+bin
+dist
+build
+coverage
+*.log
+*.out
+*.test
+.env
+.env.*
+!.env.example
+README.md
+docs
